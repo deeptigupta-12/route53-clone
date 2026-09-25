@@ -2,7 +2,6 @@
 
 A functional clone of the AWS Route53 console. Focus: recreate the Route53 UI/UX and core workflows
 (no real DNS). The UI must look and feel like the real AWS console, not a generic CRUD app.
-Deadline is tight: prefer simple, working code over clever abstractions.
 
 ## Tech stack (fixed by the assignment, do not change)
 - Frontend: Next.js (App Router) + TypeScript, in `frontend/`
@@ -86,8 +85,7 @@ frontend/
 - Create hosted zone: full-page Form with Domain name, Description, Type tiles (Public/Private), VPC fields if private.
 - Zone detail: "Hosted zone details" container + Tabs (Records, DNSSEC signing = coming soon, Hosted zone tags).
 - Records table columns: Record name, Type, Routing policy, Differentiator, Alias, Value/Route traffic to,
-  TTL (seconds), Health check ID. Search + type Select filter, multi-select, Delete record, Import zone file,
-  Create record buttons.
+  TTL (seconds), Health check ID. Search + type Select filter, multi-select, Delete record, Create record buttons.
 - Create record page: record name (with zone suffix), type Select with descriptions, value Textarea
   ("one value per line"), TTL with 1m/1h/1d quick buttons, routing policy, "Add another record".
 - Edit record: SplitPanel on the right when a record is selected.
