@@ -1,7 +1,6 @@
 "use client";
 
 import Alert from "@cloudscape-design/components/alert";
-import Box from "@cloudscape-design/components/box";
 import Button from "@cloudscape-design/components/button";
 import Container from "@cloudscape-design/components/container";
 import Form from "@cloudscape-design/components/form";
@@ -12,6 +11,7 @@ import SpaceBetween from "@cloudscape-design/components/space-between";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 
+import ClientOnly from "@/components/ClientOnly";
 import { ApiError, login } from "@/lib/api";
 
 const HOME = "/route53/hosted-zones";
@@ -130,8 +130,11 @@ export default function LoginPage() {
       }}
     >
       <div style={{ width: "100%", maxWidth: 420 }}>
-        <Suspense fallback={<Box textAlign="center">Loading…</Box>}>
-          <LoginForm />
+        {/* Suspense is required by useSearchParams; ClientOnly keeps Cloudscape out of the server render. */}
+        <Suspense fallback={null}>
+          <ClientOnly>
+            <LoginForm />
+          </ClientOnly>
         </Suspense>
       </div>
     </div>

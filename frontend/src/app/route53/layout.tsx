@@ -9,6 +9,7 @@ import TopNavigation from "@cloudscape-design/components/top-navigation";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import ClientOnly from "@/components/ClientOnly";
 import { ConsoleProvider, useConsole } from "@/components/ConsoleContext";
 import { logout } from "@/lib/api";
 import { NAV_ITEMS, navLinkForPath } from "@/lib/nav";
@@ -140,9 +141,12 @@ function ConsoleShell({ children }: { children: ReactNode }) {
 }
 
 export default function Route53Layout({ children }: { children: ReactNode }) {
+  // The whole console is client-only: Cloudscape can't compute some layout classes during SSR.
   return (
-    <ConsoleProvider>
-      <ConsoleShell>{children}</ConsoleShell>
-    </ConsoleProvider>
+    <ClientOnly>
+      <ConsoleProvider>
+        <ConsoleShell>{children}</ConsoleShell>
+      </ConsoleProvider>
+    </ClientOnly>
   );
 }

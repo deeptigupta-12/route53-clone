@@ -11,6 +11,8 @@ export interface Notification {
   type: FlashbarProps.Type;
   header?: ReactNode;
   content?: ReactNode;
+  /** Optional button shown on the right of the message, e.g. "View records". */
+  action?: ReactNode;
 }
 
 interface ConsoleContextValue {
@@ -58,6 +60,7 @@ export function ConsoleProvider({ children }: { children: ReactNode }) {
         type: n.type,
         header: n.header,
         content: n.content,
+        action: n.action,
         dismissible: true,
         dismissLabel: "Dismiss message",
         onDismiss: () => dismiss(n.id),
