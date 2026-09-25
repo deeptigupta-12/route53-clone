@@ -4,69 +4,105 @@ import Box from "@cloudscape-design/components/box";
 import Button from "@cloudscape-design/components/button";
 import CollectionPreferences from "@cloudscape-design/components/collection-preferences";
 import Header from "@cloudscape-design/components/header";
-import Link from "@cloudscape-design/components/link";
 import Pagination from "@cloudscape-design/components/pagination";
 import Select, { type SelectProps } from "@cloudscape-design/components/select";
 import SpaceBetween from "@cloudscape-design/components/space-between";
 import Table, { type TableProps } from "@cloudscape-design/components/table";
 import TextFilter from "@cloudscape-design/components/text-filter";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
-import { useBreadcrumbs, useNotifications } from "@/components/ConsoleContext";
-import DeleteZoneModal from "@/components/DeleteZoneModal";
-import { ApiError, listHostedZones } from "@/lib/api";
-import { displayZoneName } from "@/lib/format";
-import type { HostedZone, Page } from "@/lib/types";
+import { useNotifications, useSplitPanel } from "@/components/ConsoleContext";
+import DeleteRecordsModal from "@/components/DeleteRecordsModal";
+import RecordDetailsPanel from "@/components/RecordDetailsPanel";
+import { ApiError, listRecords } from "@/lib/api";
+import { ROUTING_POLICY_LABELS, displayRecordName, isDefaultRecord } from "@/lib/records";
+import { RECORD_TYPES, type DnsRecord, type HostedZone, type Page } from "@/lib/types";
 import { useTablePreferences, type TablePreferences } from "@/lib/usePreferences";
 
-const ZONES_PATH = "/route53/hosted-zones";
-const PREFS_KEY = "route53.hostedZones.preferences";
+const PREFS_KEY = "route53.records.preferences";
 const SEARCH_DEBOUNCE_MS = 300;
 const PAGE_SIZES = [10, 25, 50, 100];
 
 const TYPE_OPTIONS: SelectProps.Option[] = [
-  { value: "", label: "All hosted zones" },
-  { value: "public", label: "Public" },
-  { value: "private", label: "Private" },
+  { value: "", label: "All record types" },
+  ...[...RECORD_TYPES, "SOA"].map((t) => ({ value: t, label: t })),
 ];
 
 const COLUMN_LABELS: Record<string, string> = {
-  name: "Hosted zone name",
+  name: "Record name",
   type: "Type",
-  createdBy: "Created by",
-  recordCount: "Record count",
-  description: "Description",
-  id: "Hosted zone ID",
+  routing: "Routing policy",
+  differentiator: "Differentiator",
+  alias: "Alias",
+  value: "Value/Route traffic to",
+  ttl: "TTL (seconds)",
+  healthCheck: "Health check ID",
 };
 const COLUMN_IDS = Object.keys(COLUMN_LABELS);
 
-export default function HostedZonesPage() {
+const COLUMNS: TableProps.ColumnDefinition<DnsRecord>[] = [
+  { id: "name", header: COLUMN_LABELS.name, isRowHeader: true, cell: (r) => displayRecordName(r.name) },
+  { id: "type", header: COLUMN_LABELS.type, cell: (r) => r.type },
+  { id: "routing", header: COLUMN_LABELS.routing, cell: (r) => ROUTING_POLICY_LABELS[r.routing_policy] },
+  { id: "differentiator", header: COLUMN_LABELS.differentiator, cell: (r) => r.set_identifier || "-" },
+  { id: "alias", header: COLUMN_LABELS.alias, cell: (r) => (r.alias_target ? "Yes" : "No") },
+  {
+    id: "value",
+    header: COLUMN_LABELS.value,
+    cell: (r) =>
+      r.alias_target ? (
+        displayRecordName(r.alias_target.dns_name)
+      ) : (
+        <div>
+          {r.values.map((v, i) => (
+            <div key={i}>{v}</div>
+          ))}
+        </div>
+      ),
+  },
+  { id: "ttl", header: COLUMN_LABELS.ttl, cell: (r) => (r.alias_target ? "-" : r.ttl) },
+  { id: "healthCheck", header: COLUMN_LABELS.healthCheck, cell: () => "-" },
+];
+
+interface Props {
+  zone: HostedZone;
+  /** Called after records are created, edited or deleted (to refresh the zone details). */
+  onChanged: () => void;
+}
+
+export default function RecordsTable({ zone, onChanged }: Props) {
   const router = useRouter();
   const { notify } = useNotifications();
-  useBreadcrumbs([
-    { text: "Route 53", href: "/route53/dashboard" },
-    { text: "Hosted zones", href: ZONES_PATH },
-  ]);
+  const { prefs, ready: prefsReady, save: savePrefs } = useTablePreferences(PREFS_KEY, COLUMN_IDS, PAGE_SIZES, 50);
 
-  const { prefs, ready: prefsReady, save: savePrefs } = useTablePreferences(PREFS_KEY, COLUMN_IDS, PAGE_SIZES, 10);
   const [filteringText, setFilteringText] = useState("");
   const [search, setSearch] = useState("");
   const [typeOption, setTypeOption] = useState<SelectProps.Option>(TYPE_OPTIONS[0]);
   const [page, setPage] = useState(1);
   const [reloadKey, setReloadKey] = useState(0);
-  const [data, setData] = useState<Page<HostedZone> | null>(null);
+  const [data, setData] = useState<Page<DnsRecord> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<HostedZone[]>([]);
+  const [selected, setSelected] = useState<DnsRecord[]>([]);
   const [deleteVisible, setDeleteVisible] = useState(false);
   const requestId = useRef(0);
   const searchRef = useRef("");
 
   const typeFilter = typeOption.value ?? "";
-  const selectedZone = selected[0] ?? null;
   const isFiltered = search !== "" || typeFilter !== "";
+  const single = selected.length === 1 ? selected[0] : null;
+  const hasDefault = selected.some((r) => isDefaultRecord(r, zone.name));
 
-  // Debounce the search box; a new search starts again from page 1.
+  const panel = useSplitPanel(single ? `${displayRecordName(single.name)} ${single.type}` : "Record details");
+  const { setOpen: setPanelOpen } = panel;
+
+  // Selecting exactly one record opens the split panel.
+  const singleId = single?.id ?? null;
+  useEffect(() => {
+    if (singleId !== null) setPanelOpen(true);
+  }, [singleId, setPanelOpen]);
+
   useEffect(() => {
     const t = setTimeout(() => {
       const next = filteringText.trim();
@@ -83,33 +119,32 @@ export default function HostedZonesPage() {
     if (!prefsReady) return;
     const id = ++requestId.current;
     setLoading(true);
-    listHostedZones({ search, type: typeFilter, page, page_size: prefs.pageSize })
+    listRecords(zone.id, { search, type: typeFilter, page, page_size: prefs.pageSize })
       .then((res) => {
-        if (id !== requestId.current) return; // a newer request is in flight
+        if (id !== requestId.current) return;
         const lastPage = Math.max(1, Math.ceil(res.total / prefs.pageSize));
         if (page > lastPage) {
-          setPage(lastPage); // e.g. the last zone on this page was deleted
+          setPage(lastPage);
           return;
         }
         setData(res);
-        // Keep the selection only if the zone is still on this page, using the fresh copy.
-        setSelected((sel) => res.items.filter((z) => sel.some((s) => s.id === z.id)));
+        setSelected((sel) => res.items.filter((r) => sel.some((s) => s.id === r.id)));
       })
       .catch((err: unknown) => {
         if (id !== requestId.current) return;
-        if (err instanceof ApiError && err.status === 401) return; // api.ts redirects to /login
+        if (err instanceof ApiError && err.status === 401) return;
         notify({
           type: "error",
-          header: "Failed to load hosted zones",
+          header: "Failed to load records",
           content: err instanceof ApiError ? err.message : "Unexpected error.",
         });
       })
       .finally(() => {
         if (id === requestId.current) setLoading(false);
       });
-  }, [prefsReady, search, typeFilter, page, prefs.pageSize, reloadKey, notify]);
+  }, [zone.id, prefsReady, search, typeFilter, page, prefs.pageSize, reloadKey, notify]);
 
-  const openZone = (zone: HostedZone) => router.push(`${ZONES_PATH}/${zone.id}`);
+  const reload = () => setReloadKey((k) => k + 1);
 
   const clearFilters = () => {
     setFilteringText("");
@@ -119,87 +154,69 @@ export default function HostedZonesPage() {
     setPage(1);
   };
 
-  const columns = useMemo<TableProps.ColumnDefinition<HostedZone>[]>(
-    () => [
-      {
-        id: "name",
-        header: COLUMN_LABELS.name,
-        isRowHeader: true,
-        cell: (z) => (
-          <Link
-            href={`${ZONES_PATH}/${z.id}`}
-            onFollow={(e) => {
-              e.preventDefault();
-              router.push(`${ZONES_PATH}/${z.id}`);
-            }}
-          >
-            {displayZoneName(z.name)}
-          </Link>
-        ),
-      },
-      { id: "type", header: COLUMN_LABELS.type, cell: (z) => (z.is_private ? "Private" : "Public") },
-      { id: "createdBy", header: COLUMN_LABELS.createdBy, cell: () => "Route 53" },
-      { id: "recordCount", header: COLUMN_LABELS.recordCount, cell: (z) => z.record_count },
-      { id: "description", header: COLUMN_LABELS.description, cell: (z) => z.comment || "-" },
-      { id: "id", header: COLUMN_LABELS.id, cell: (z) => z.id },
-    ],
-    [router],
-  );
-
   const total = data?.total ?? 0;
   const pagesCount = Math.max(1, Math.ceil(total / prefs.pageSize));
+  const createPath = `/route53/hosted-zones/${zone.id}/create-record`;
+
+  const panelBody = single ? (
+    <RecordDetailsPanel
+      record={single}
+      zoneName={zone.name}
+      onUpdated={(updated) => {
+        setSelected([updated]);
+        setData((d) => (d ? { ...d, items: d.items.map((r) => (r.id === updated.id ? updated : r)) } : d));
+        reload();
+        onChanged();
+      }}
+    />
+  ) : (
+    <Box color="text-body-secondary">
+      {selected.length > 1
+        ? `${selected.length} records selected. Select a single record to view its details.`
+        : "Select a single record to view its details."}
+    </Box>
+  );
 
   return (
     <>
-      <Table<HostedZone>
-        variant="full-page"
+      <Table<DnsRecord>
+        variant="container"
         stickyHeader
         trackBy="id"
         items={data?.items ?? []}
-        columnDefinitions={columns}
+        columnDefinitions={COLUMNS}
         columnDisplay={prefs.contentDisplay}
         loading={loading}
-        loadingText="Loading hosted zones"
-        selectionType="single"
+        loadingText="Loading records"
+        selectionType="multi"
         selectedItems={selected}
         onSelectionChange={({ detail }) => setSelected(detail.selectedItems)}
         onRowClick={({ detail }) => setSelected([detail.item])}
         ariaLabels={{
-          selectionGroupLabel: "Hosted zone selection",
-          itemSelectionLabel: (_s, z) => displayZoneName(z.name),
-          allItemsSelectionLabel: () => "Select all hosted zones",
+          selectionGroupLabel: "Record selection",
+          itemSelectionLabel: (_s, r) => `${displayRecordName(r.name)} ${r.type}`,
+          allItemsSelectionLabel: () => "Select all records on this page",
         }}
         header={
           <Header
-            variant="awsui-h1-sticky"
-            counter={data ? `(${total})` : undefined}
+            counter={data ? (selected.length > 0 ? `(${selected.length}/${total})` : `(${total})`) : undefined}
             actions={
               <SpaceBetween direction="horizontal" size="xs">
+                <Button iconName="refresh" ariaLabel="Refresh records" disabled={loading} onClick={reload} />
                 <Button
-                  iconName="refresh"
-                  ariaLabel="Refresh hosted zones"
-                  disabled={loading}
-                  onClick={() => setReloadKey((k) => k + 1)}
-                />
-                <Button disabled={!selectedZone} onClick={() => (selectedZone ? openZone(selectedZone) : undefined)}>
-                  View details
-                </Button>
-                <Button
-                  disabled={!selectedZone}
-                  onClick={() => (selectedZone ? router.push(`${ZONES_PATH}/${selectedZone.id}/edit`) : undefined)}
+                  disabled={selected.length === 0 || hasDefault}
+                  disabledReason={hasDefault ? "The default NS and SOA records can't be deleted." : undefined}
+                  onClick={() => setDeleteVisible(true)}
                 >
-                  Edit
+                  Delete record
                 </Button>
-                <Button disabled={!selectedZone} onClick={() => setDeleteVisible(true)}>
-                  Delete
-                </Button>
-                <Button variant="primary" onClick={() => router.push(`${ZONES_PATH}/create`)}>
-                  Create hosted zone
+                <Button variant="primary" onClick={() => router.push(createPath)}>
+                  Create record
                 </Button>
               </SpaceBetween>
             }
           >
-            Hosted zones
+            Records
           </Header>
         }
         filter={
@@ -208,12 +225,12 @@ export default function HostedZonesPage() {
               <TextFilter
                 filteringText={filteringText}
                 onChange={({ detail }) => setFilteringText(detail.filteringText)}
-                filteringPlaceholder="Search hosted zones by name, description or ID"
-                filteringAriaLabel="Filter hosted zones"
+                filteringPlaceholder="Filter records by name or value"
+                filteringAriaLabel="Filter records"
                 countText={search !== "" && data ? `${total} ${total === 1 ? "match" : "matches"}` : undefined}
               />
             </div>
-            <div style={{ flex: "0 1 220px" }}>
+            <div style={{ flex: "0 1 200px" }}>
               <Select
                 selectedOption={typeOption}
                 onChange={({ detail }) => {
@@ -221,7 +238,7 @@ export default function HostedZonesPage() {
                   setPage(1);
                 }}
                 options={TYPE_OPTIONS}
-                ariaLabel="Filter by hosted zone type"
+                ariaLabel="Filter by record type"
               />
             </div>
           </div>
@@ -254,7 +271,7 @@ export default function HostedZonesPage() {
             }}
             pageSizePreference={{
               title: "Page size",
-              options: PAGE_SIZES.map((v) => ({ value: v, label: `${v} hosted zones` })),
+              options: PAGE_SIZES.map((v) => ({ value: v, label: `${v} records` })),
             }}
             contentDisplayPreference={{
               title: "Column preferences",
@@ -271,7 +288,7 @@ export default function HostedZonesPage() {
                   No matches
                 </Box>
                 <Box variant="p" color="inherit">
-                  No hosted zones match the filter.
+                  No records match the filter.
                 </Box>
                 <Button onClick={clearFilters}>Clear filter</Button>
               </SpaceBetween>
@@ -280,25 +297,24 @@ export default function HostedZonesPage() {
             <Box textAlign="center" color="inherit" padding={{ vertical: "l" }}>
               <SpaceBetween size="m">
                 <Box variant="strong" color="inherit">
-                  No hosted zones
+                  No records
                 </Box>
-                <Box variant="p" color="inherit">
-                  You don&apos;t have any hosted zones yet.
-                </Box>
-                <Button onClick={() => router.push(`${ZONES_PATH}/create`)}>Create hosted zone</Button>
+                <Button onClick={() => router.push(createPath)}>Create record</Button>
               </SpaceBetween>
             </Box>
           )
         }
       />
-      <DeleteZoneModal
-        zone={selectedZone}
+      {panel.target ? createPortal(panelBody, panel.target) : null}
+      <DeleteRecordsModal
+        zoneId={zone.id}
+        records={selected}
         visible={deleteVisible}
         onDismiss={() => setDeleteVisible(false)}
         onDeleted={() => {
           setSelected([]);
-          setDeleteVisible(false);
-          setReloadKey((k) => k + 1);
+          reload();
+          onChanged();
         }}
       />
     </>

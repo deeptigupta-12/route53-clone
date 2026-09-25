@@ -22,6 +22,14 @@ interface ConsoleContextValue {
   flashItems: FlashbarProps.MessageDefinition[];
   notify: (n: Notification) => string;
   dismiss: (id: string) => void;
+  /** Header of the split panel registered by the current page, or null when the page has none. */
+  splitPanelHeader: string | null;
+  setSplitPanelHeader: (header: string | null) => void;
+  splitPanelOpen: boolean;
+  setSplitPanelOpen: (open: boolean) => void;
+  /** Element inside the SplitPanel that pages portal their panel content into. */
+  splitPanelTarget: HTMLElement | null;
+  setSplitPanelTarget: (el: HTMLElement | null) => void;
 }
 
 const ConsoleContext = createContext<ConsoleContextValue | null>(null);
@@ -33,6 +41,9 @@ export function ConsoleProvider({ children }: { children: ReactNode }) {
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbGroupProps.Item[]>([]);
   const [notifications, setNotifications] = useState<(Notification & { id: string })[]>([]);
   const nextId = useRef(0);
+  const [splitPanelHeader, setSplitPanelHeader] = useState<string | null>(null);
+  const [splitPanelOpen, setSplitPanelOpen] = useState(false);
+  const [splitPanelTarget, setSplitPanelTarget] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     // A 401 here is handled by the API client (redirect to /login).
@@ -69,8 +80,21 @@ export function ConsoleProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ user, breadcrumbs, setBreadcrumbs, flashItems, notify, dismiss }),
-    [user, breadcrumbs, flashItems, notify, dismiss],
+    () => ({
+      user,
+      breadcrumbs,
+      setBreadcrumbs,
+      flashItems,
+      notify,
+      dismiss,
+      splitPanelHeader,
+      setSplitPanelHeader,
+      splitPanelOpen,
+      setSplitPanelOpen,
+      splitPanelTarget,
+      setSplitPanelTarget,
+    }),
+    [user, breadcrumbs, flashItems, notify, dismiss, splitPanelHeader, splitPanelOpen, splitPanelTarget],
   );
   return <ConsoleContext.Provider value={value}>{children}</ConsoleContext.Provider>;
 }
@@ -94,4 +118,23 @@ export function useBreadcrumbs(items: BreadcrumbGroupProps.Item[]): void {
 export function useNotifications() {
   const { notify, dismiss } = useConsole();
   return { notify, dismiss };
+}
+
+/**
+ * Register a split panel (shown on the right of the page) for as long as the calling component is mounted.
+ * Render the panel body with createPortal(body, target) — only the header string goes through state.
+ */
+export function useSplitPanel(header: string) {
+  const { setSplitPanelHeader, splitPanelTarget, splitPanelOpen, setSplitPanelOpen } = useConsole();
+  useEffect(() => {
+    setSplitPanelHeader(header);
+  }, [header, setSplitPanelHeader]);
+  useEffect(
+    () => () => {
+      setSplitPanelHeader(null);
+      setSplitPanelOpen(false);
+    },
+    [setSplitPanelHeader, setSplitPanelOpen],
+  );
+  return { target: splitPanelTarget, open: splitPanelOpen, setOpen: setSplitPanelOpen };
 }

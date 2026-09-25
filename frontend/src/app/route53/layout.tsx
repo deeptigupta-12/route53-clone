@@ -5,6 +5,7 @@ import BreadcrumbGroup from "@cloudscape-design/components/breadcrumb-group";
 import Flashbar from "@cloudscape-design/components/flashbar";
 import Input, { type InputProps } from "@cloudscape-design/components/input";
 import SideNavigation from "@cloudscape-design/components/side-navigation";
+import SplitPanel from "@cloudscape-design/components/split-panel";
 import TopNavigation from "@cloudscape-design/components/top-navigation";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -23,8 +24,18 @@ function formatAccountId(id: string): string {
 function ConsoleShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { user, breadcrumbs, flashItems } = useConsole();
+  const {
+    user,
+    breadcrumbs,
+    flashItems,
+    splitPanelHeader,
+    splitPanelOpen,
+    setSplitPanelOpen,
+    setSplitPanelTarget,
+  } = useConsole();
   const [navigationOpen, setNavigationOpen] = useState(true);
+  // The record panel opens on the right ("side"), as in the Route 53 console.
+  const [splitPanelPosition, setSplitPanelPosition] = useState<"side" | "bottom">("side");
   const [search, setSearch] = useState("");
   const searchRef = useRef<InputProps.Ref>(null);
 
@@ -133,6 +144,25 @@ function ConsoleShell({ children }: { children: ReactNode }) {
           ) : undefined
         }
         notifications={flashItems.length > 0 ? <Flashbar items={flashItems} /> : undefined}
+        splitPanel={
+          splitPanelHeader !== null ? (
+            <SplitPanel
+              header={splitPanelHeader}
+              hidePreferencesButton
+              i18nStrings={{
+                closeButtonAriaLabel: "Close panel",
+                openButtonAriaLabel: "Open panel",
+                resizeHandleAriaLabel: "Resize panel",
+              }}
+            >
+              <div ref={setSplitPanelTarget} />
+            </SplitPanel>
+          ) : undefined
+        }
+        splitPanelOpen={splitPanelHeader !== null && splitPanelOpen}
+        onSplitPanelToggle={({ detail }) => setSplitPanelOpen(detail.open)}
+        splitPanelPreferences={{ position: splitPanelPosition }}
+        onSplitPanelPreferencesChange={({ detail }) => setSplitPanelPosition(detail.position)}
         toolsHide
         content={children}
       />
